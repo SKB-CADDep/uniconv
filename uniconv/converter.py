@@ -1,222 +1,185 @@
+"""ID-based conversion using the external engineering units registry."""
+
 from __future__ import annotations
-from typing import Callable, Union, Dict, Any
+
+import copy
+import logging
+import math
+from typing import Callable, Union, Optional, Dict, List, Any
+
 from . import constants as const
+from .data_loader import load_data
+from .hardness import HardnessConverter
+from .exceptions import UnknownParameterError, UnknownUnitError
+
+logger = logging.getLogger(__name__)
 
 Number = Union[int, float]
 FactorOrFunc = Union[Number, Callable[[Number], Number]]
 
 
-class UnknownParameterError(ValueError):
-    """Исключение для неизвестного типа параметра."""
-    pass
-
-
-class UnknownUnitError(ValueError):
-    """Исключение для неизвестной единицы измерения."""
-    pass
-
-
 class UnitConverter:
-    """
-    Универсальный и расширяемый конвертер инженерных единиц измерения,
-    ориентированный на термодинамические расчеты.
+    """Convert exact unit codes of a parameter addressed by its string ID.
+
+    Unknown IDs raise UnknownParameterError and unknown unit codes raise
+    UnknownUnitError. Names and UI labels are never used for lookup.
+    Hardness conversion uses the bundled table and returns None outside valid intervals.
     """
 
     def __init__(self) -> None:
-        self.parameters: Dict[str, Dict[str, Any]] = {}
-        self._build_defaults()
+        self.parameters, self.hardness_data, self.presets = load_data()
+        self._custom = {}
+        self._hardness = HardnessConverter(self.hardness_data)
 
-    # ------------------------ PUBLIC API -----------------------------
-    def convert(self, value: Number, *,
-                from_unit: str,
-                to_unit: str,
-                parameter_type: str) -> float:
+    def _get_parameter(self, type_id: str) -> Dict[str, Any]:
+        if not isinstance(type_id, str) or type_id not in self.parameters:
+            raise UnknownParameterError("Unknown parameter ID: {!r}".format(type_id))
+        return self.parameters[type_id]
+
+    def _check_unit(self, type_id: str, code: str) -> Dict[str, Any]:
+        entry = self._get_parameter(type_id)
+        if not isinstance(code, str) or code not in entry["factors"]:
+            raise UnknownUnitError("Unknown unit {!r} for parameter {!r}".format(code, type_id))
+        return entry
+
+    def convert(self, value: Number, from_u: str, to_u: str, type_id: str) -> Optional[float]:
+        """Convert through the base unit, without rounding registry factors."""
+        entry = self._check_unit(type_id, from_u)
+        self._check_unit(type_id, to_u)
+        if from_u == to_u:
+            return value
+        if type_id not in ("1", "34") and (type_id, from_u) not in self._custom and (type_id, to_u) not in self._custom:
+            return value * entry["factors"][from_u] / entry["factors"][to_u]
+        base_value = self.to_base(value, from_u, type_id)
+        if base_value is None:
+            return None
+        return self.from_base(base_value, to_u, type_id)
+
+    def to_base(self, value: Number, from_u: str, type_id: str) -> Optional[float]:
+        """Convert a registered unit code to its parameter's base unit."""
+        entry = self._check_unit(type_id, from_u)
+        custom = self._custom.get((type_id, from_u))
+        if custom:
+            return custom[0](value)
+        if type_id == "34":
+            return self._hardness.to_base(value, from_u)
+        if type_id == "1":
+            if from_u == "K":
+                return value - const.CELSIUS_TO_KELVIN_OFFSET
+            if from_u == "F":
+                return (value - const.FAHRENHEIT_OFFSET) * const.FAHRENHEIT_RATIO
+            if from_u == "Re":
+                return value * const.REAUMUR_TO_CELSIUS
+        factor = entry["factors"][from_u]
+        return None if factor == const.TABLE else value * factor
+
+    def from_base(self, value: Number, to_u: str, type_id: str) -> Optional[float]:
+        """Convert the base value to a registered unit code."""
+        entry = self._check_unit(type_id, to_u)
+        custom = self._custom.get((type_id, to_u))
+        if custom:
+            return custom[1](value)
+        if type_id == "34":
+            return self._hardness.from_base(value, to_u)
+        if type_id == "1":
+            if to_u == "K":
+                return value + const.CELSIUS_TO_KELVIN_OFFSET
+            if to_u == "F":
+                return value * const.FAHRENHEIT_RATIO_INV + const.FAHRENHEIT_OFFSET
+            if to_u == "Re":
+                return value * const.CELSIUS_TO_REAUMUR
+        factor = entry["factors"][to_u]
+        return None if factor == const.TABLE else value / factor
+
+    def get_available_units(self, type_id: str) -> List[Dict[str, str]]:
+        """Return code/UI pairs in registry order, as independent dictionaries."""
+        entry = self._get_parameter(type_id)
+        return [{"code": code, "ui": entry["display_labels"][code]} for code in entry["factors"]]
+
+    def get_parameter_info(self, type_id: str) -> Dict[str, str]:
+        """Return ID, Russian/English names and the base unit code."""
+        entry = self._get_parameter(type_id)
+        return dict(id=type_id, **{key: entry[key] for key in ("name_RU", "name_ENG", "base_unit")})
+
+    def get_base_unit(self, type_id: str) -> str:
+        """Return the exact base unit code."""
+        return self._get_parameter(type_id)["base_unit"]
+
+    def list_presets(self) -> List[str]:
+        """Return preset names in data-file order."""
+        return list(self.presets)
+
+    def get_preset(self, name: str) -> Optional[Dict[str, str]]:
+        """Return an independent raw ID/code mapping, or None for an unknown name."""
+        preset = self.presets.get(name)
+        return None if preset is None else copy.deepcopy(preset["units"])
+
+    def apply_preset(self, name: str) -> Optional[Dict[str, Dict[str, str]]]:
+        """Resolve existing ID/code pairs to code/UI objects, logging omissions.
+
+        This method does not convert values or alter the converter's registry.
         """
-        Универсальная конвертация между двумя единицами одного параметра.
-        """
-        p_type = self._norm_param(parameter_type)
-        base_val = self.to_base(value, from_unit=from_unit, parameter_type=p_type)
-        return self.from_base(base_val, to_unit=to_unit, parameter_type=p_type)
+        units = self.get_preset(name)
+        if units is None:
+            return None
+        result = {}
+        for type_id, code in units.items():
+            entry = self.parameters.get(type_id)
+            if entry is None or code not in entry["factors"]:
+                logger.warning("Preset %r: skipping invalid pair type_id=%r, code=%r", name, type_id, code)
+                continue
+            result[type_id] = {"code": code, "ui": entry["display_labels"][code]}
+        return result
 
-    def to_base(self, value: Number, *, from_unit: str, parameter_type: str) -> float:
-        """Перевод `value` из `from_unit` в базовую единицу параметра."""
-        p_type = self._norm_param(parameter_type)
-        unit = self._get_unit(p_type, from_unit)
-        return unit["to_base"](value)
-
-    def from_base(self, value: Number, *, to_unit: str, parameter_type: str) -> float:
-        """Перевод `value` из базовой единицы в `to_unit`."""
-        p_type = self._norm_param(parameter_type)
-        unit = self._get_unit(p_type, to_unit)
-        return unit["from_base"](value)
-
-    def get_available_units(self, parameter_type: str) -> list[str]:
-        """Возвращает список всех поддерживаемых символов единиц для параметра."""
-        p_type = self._norm_param(parameter_type)
-        return list(self.parameters[p_type]["units"])
-
-    def get_base_unit(self, parameter_type: str) -> str:
-        """Возвращает символ базовой единицы для параметра."""
-        p_type = self._norm_param(parameter_type)
-        return self.parameters[p_type]["base"]
-
-    # ------ Расширение (динамическое добавление) -----------------
-    def add_parameter(self, parameter_type: str, *, base_unit_symbol: str, base_unit_name: str,
-                      parameter_name: str) -> None:
-        """Добавить новый тип физического параметра."""
-        p = self._norm_param(parameter_type)
-        if p in self.parameters:
-            raise ValueError(f"Параметр '{parameter_type}' уже существует")
-        self.parameters[p] = {
-            "name": parameter_name,
-            "base": base_unit_symbol,
-            "units": {
-                base_unit_symbol: {
-                    "name": base_unit_name,
-                    "to_base": lambda v: v,
-                    "from_base": lambda v: v,
-                }
-            },
+    def add_parameter(self, type_id: str, *, base_unit_symbol: str,
+                      base_unit_name: str, parameter_name: str,
+                      parameter_name_eng: Optional[str] = None) -> None:
+        """Register a new decimal string ID in this instance only."""
+        if not isinstance(type_id, str) or not type_id or not type_id.isascii() or not type_id.isdecimal():
+            raise ValueError("type_id must be a decimal string ID")
+        if type_id in self.parameters:
+            raise ValueError("Parameter {!r} already exists".format(type_id))
+        if not isinstance(base_unit_symbol, str) or not base_unit_symbol:
+            raise ValueError("base_unit_symbol must be a nonempty code")
+        self.parameters[type_id] = {
+            "name_RU": parameter_name,
+            "name_ENG": parameter_name_eng if parameter_name_eng is not None else parameter_name,
+            "base_unit": base_unit_symbol,
+            "factors": {base_unit_symbol: 1.0},
+            "display_labels": {base_unit_symbol: base_unit_symbol},
         }
 
-    def add_unit(self, parameter_type: str, *, unit_symbol: str, unit_name: str,
-                 to_base: FactorOrFunc, from_base: FactorOrFunc | None = None) -> None:
-        """Добавить новую единицу к существующему параметру."""
-        p_type = self._norm_param(parameter_type)
-        if p_type not in self.parameters:
-            raise UnknownParameterError(p_type)
+    def add_unit(self, type_id: str, *, unit_symbol: str, unit_name: str,
+                 to_base: FactorOrFunc, from_base: Optional[FactorOrFunc] = None,
+                 display_label: Optional[str] = None) -> None:
+        """Add a factor or a pair of conversion functions to this instance.
 
-        if not callable(to_base):
-            to_base_func = lambda v, f=float(to_base): v * f
+        Callable to_base requires an explicit inverse. A numeric from_base is
+        a multiplier, preserving the original dynamic extension convention.
+        """
+        entry = self._get_parameter(type_id)
+        if not isinstance(unit_symbol, str) or not unit_symbol:
+            raise ValueError("unit_symbol must be a nonempty code")
+        if unit_symbol == entry["base_unit"]:
+            raise ValueError("Cannot replace the base unit conversion")
+        if callable(to_base):
+            if from_base is None:
+                raise ValueError("from_base is required for callable conversions")
+            forward = to_base
         else:
-            to_base_func = to_base
-
+            factor = float(to_base)
+            if not math.isfinite(factor) or factor == 0:
+                raise ValueError("to_base must be finite and nonzero")
+            forward = lambda value: value * factor
         if from_base is None:
-            if callable(to_base):
-                raise ValueError("`from_base` обязателен для нелинейных конверсий.")
-            from_base = 1.0 / float(to_base)
-
-        if not callable(from_base):
-            from_base_func = lambda v, f=float(from_base): v * f
+            inverse = lambda value: value / factor
+        elif callable(from_base):
+            inverse = from_base
         else:
-            from_base_func = from_base
-
-        self.parameters[p_type]["units"][unit_symbol] = {
-            "name": unit_name,
-            "to_base": to_base_func,
-            "from_base": from_base_func,
-        }
-
-    # ---------------------- INTERNAL -----------------------------
-    @staticmethod
-    def _norm_param(p: str) -> str:
-        return p.strip().lower()
-
-    def _get_unit(self, parameter_type: str, unit_symbol: str) -> Dict[str, Any]:
-        if parameter_type not in self.parameters:
-            raise UnknownParameterError(parameter_type)
-        units_dict = self.parameters[parameter_type]["units"]
-        if unit_symbol not in units_dict:
-            raise UnknownUnitError(f"Единица '{unit_symbol}' не найдена для параметра '{parameter_type}'.")
-        return units_dict[unit_symbol]
-
-    # ------------------- Инициализация по умолчанию ----------------------
-    def _build_defaults(self) -> None:
-        """
-        Инициализация параметров и единиц "из коробки" согласно требованиям.
-        Базовые единицы выбраны в соответствии с вашим списком.
-        """
-        # P - Давление
-        self.add_parameter("pressure", parameter_name="Давление",
-                           base_unit_symbol="кгс/см²",
-                           base_unit_name="Килограмм-сила на квадратный сантиметр (техническая атмосфера)")
-        self.add_unit("pressure", unit_symbol="ат", unit_name="Техническая атмосфера", to_base=1.0, from_base=1.0)
-        self.add_unit("pressure", unit_symbol="Па", unit_name="Паскаль",
-                      to_base=1.0 / const.KGF_PER_CM2_TO_PA,
-                      from_base=const.KGF_PER_CM2_TO_PA)
-        self.add_unit("pressure", unit_symbol="кПа", unit_name="Килопаскаль",
-                      to_base=1000 / const.KGF_PER_CM2_TO_PA,
-                      from_base=const.KGF_PER_CM2_TO_PA / 1000)
-        self.add_unit("pressure", unit_symbol="МПа", unit_name="Мегапаскаль",
-                      to_base=1_000_000 / const.KGF_PER_CM2_TO_PA,
-                      from_base=const.KGF_PER_CM2_TO_PA / 1_000_000)
-        self.add_unit("pressure", unit_symbol="бар", unit_name="Бар",
-                      to_base=const.BAR_TO_PA / const.KGF_PER_CM2_TO_PA,
-                      from_base=const.KGF_PER_CM2_TO_PA / const.BAR_TO_PA)
-        self.add_unit("pressure", unit_symbol="атм", unit_name="Физическая атмосфера",
-                      to_base=const.ATM_TO_PA / const.KGF_PER_CM2_TO_PA,
-                      from_base=const.KGF_PER_CM2_TO_PA / const.ATM_TO_PA)
-        self.add_unit("pressure", unit_symbol="мм рт. ст.", unit_name="Миллиметр ртутного столба",
-                      to_base=const.MM_HG_TO_PA / const.KGF_PER_CM2_TO_PA,
-                      from_base=const.KGF_PER_CM2_TO_PA / const.MM_HG_TO_PA)
-
-        # T - Температура
-        self.add_parameter("temperature", parameter_name="Температура",
-                           base_unit_symbol="°C", base_unit_name="Градус Цельсия")
-        self.add_unit("temperature", unit_symbol="K", unit_name="Кельвин",
-                      to_base=lambda v: v - const.CELSIUS_TO_KELVIN_OFFSET,  # K -> °C
-                      from_base=lambda v: v + const.CELSIUS_TO_KELVIN_OFFSET)  # °C -> K
-
-        # H - Удельная энтальпия
-        self.add_parameter("specific_enthalpy", parameter_name="Удельная энтальпия",
-                           base_unit_symbol="ккал/кг", base_unit_name="Килокалория на килограмм")
-        self.add_unit("specific_enthalpy", unit_symbol="кДж/кг", unit_name="Килоджоуль на килограмм",
-                      to_base=1.0 / const.CAL_TO_J,  # кДж -> ккал
-                      from_base=const.CAL_TO_J)
-        self.add_unit("specific_enthalpy", unit_symbol="Дж/кг", unit_name="Джоуль на килограмм",
-                      to_base=1.0 / (const.CAL_TO_J * 1000),
-                      from_base=const.CAL_TO_J * 1000)
-
-        # S - Удельная энтропия
-        self.add_parameter("specific_entropy", parameter_name="Удельная энтропия",
-                           base_unit_symbol="ккал/кг·K", base_unit_name="Килокалория на килограмм-Кельвин")
-        self.add_unit("specific_entropy", unit_symbol="кДж/кг·K", unit_name="Килоджоуль на килограмм-Кельвин",
-                      to_base=1.0 / const.CAL_TO_J,
-                      from_base=const.CAL_TO_J)
-
-        # v - Удельный объем
-        self.add_parameter("specific_volume", parameter_name="Удельный объем",
-                           base_unit_symbol="м³/кг", base_unit_name="Кубический метр на килограмм")
-
-        # ρ - Плотность
-        self.add_parameter("density", parameter_name="Плотность",
-                           base_unit_symbol="кг/м³", base_unit_name="Килограмм на кубический метр")
-        self.add_unit("density", unit_symbol="г/см³", unit_name="Грамм на кубический сантиметр",
-                      to_base=1000.0, from_base=0.001)
-
-        # N - Мощность
-        self.add_parameter("power", parameter_name="Мощность",
-                           base_unit_symbol="МВт", base_unit_name="Мегаватт")
-        self.add_unit("power", unit_symbol="кВт", unit_name="Киловатт", to_base=0.001, from_base=1000.0)
-        self.add_unit("power", unit_symbol="Вт", unit_name="Ватт", to_base=1.0e-6, from_base=1.0e6)
-        self.add_unit("power", unit_symbol="л.с.", unit_name="Метрическая лошадиная сила",
-                      to_base=const.HP_TO_W / 1.0e6,  # л.с. -> Вт -> МВт
-                      from_base=1.0e6 / const.HP_TO_W)
-
-        # G - Массовый расход
-        self.add_parameter("mass_flow_rate", parameter_name="Массовый расход",
-                           base_unit_symbol="т/ч", base_unit_name="Тонна в час")
-        self.add_unit("mass_flow_rate", unit_symbol="кг/с", unit_name="Килограмм в секунду",
-                      to_base=1.0 / const.T_PER_H_TO_KG_PER_S,  # кг/с -> т/ч
-                      from_base=const.T_PER_H_TO_KG_PER_S)
-        self.add_unit("mass_flow_rate", unit_symbol="кг/ч", unit_name="Килограмм в час",
-                      to_base=0.001, from_base=1000.0)
-
-        # Q - Тепловая мощность (тепловой поток)
-        self.add_parameter("heat_power", parameter_name="Тепловая мощность",
-                           base_unit_symbol="Гкал/ч", base_unit_name="Гигакалория в час")
-        # 1 Гкал/ч = 10^9 кал/ч = 10^9 * 4.1868 Дж / 3600 с = 1.163 МВт
-        GCAL_H_TO_MW = (1.0e9 * const.CAL_TO_J) / 3600 / 1.0e6
-        self.add_unit("heat_power", unit_symbol="МВт", unit_name="Мегаватт (тепловой)",
-                      to_base=GCAL_H_TO_MW,
-                      from_base=1.0 / GCAL_H_TO_MW)
-        self.add_unit("heat_power", unit_symbol="кВт", unit_name="Киловатт (тепловой)",
-                      to_base=GCAL_H_TO_MW / 1000.0,
-                      from_base=1000.0 / GCAL_H_TO_MW)
-
-        # X, Y - Степень сухости / влажности
-        self.add_parameter("dryness_fraction", parameter_name="Степень сухости",
-                           base_unit_symbol="%", base_unit_name="Проценты")
-        self.add_unit("dryness_fraction", unit_symbol="доля", unit_name="Доля (0-1)",
-                      to_base=lambda v: v * 100.0,  # доля -> %
-                      from_base=lambda v: v / 100.0)  # % -> доля
+            inverse_factor = float(from_base)
+            if not math.isfinite(inverse_factor) or inverse_factor == 0:
+                raise ValueError("from_base must be finite and nonzero")
+            inverse = lambda value: value * inverse_factor
+        entry["factors"][unit_symbol] = "custom" if callable(to_base) else factor
+        entry["display_labels"][unit_symbol] = display_label if display_label is not None else unit_symbol
+        self._custom[(type_id, unit_symbol)] = (forward, inverse)
