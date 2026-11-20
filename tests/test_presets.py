@@ -31,12 +31,14 @@ class TestPresets(unittest.TestCase):
             self.assertEqual(set(applied), set(expected))
             self.assertEqual(len(logs.output), len(raw) - len(expected))
             for type_id, value in applied.items():
-                self.assertEqual(value, {"code": expected[type_id], "ui": before[type_id]["display_labels"][expected[type_id]]})
+                self.assertEqual(value, {
+                                 "code": expected[type_id], "ui": before[type_id]["display_labels"][expected[type_id]]})
             self.assertEqual(self.uc.get_preset(name), raw)
         self.assertEqual(self.uc.parameters, before)
 
     def test_invalid_ids_and_codes_are_logged_and_valid_pairs_survive(self):
-        self.uc.presets["test"] = {"units": {"0": "кгс/см2", "999": "x", "1": "bad"}}
+        self.uc.presets["test"] = {
+            "units": {"0": "кгс/см2", "999": "x", "1": "bad"}}
         with self.assertLogs("uniconv.converter", level="WARNING") as logs:
             applied = self.uc.apply_preset("test")
         self.assertEqual(applied, {"0": {"code": "кгс/см2", "ui": "кгс/см²"}})
@@ -51,6 +53,7 @@ class TestPresets(unittest.TestCase):
         self.uc.presets["empty"] = {"units": {}}
         from unittest.mock import patch
         with patch("uniconv.converter.logger.warning") as warning:
-            self.assertEqual(self.uc.apply_preset("partial"), {"0": {"code": "Па", "ui": "Па"}})
+            self.assertEqual(self.uc.apply_preset("partial"), {
+                             "0": {"code": "Па", "ui": "Па"}})
             self.assertEqual(self.uc.apply_preset("empty"), {})
             warning.assert_not_called()

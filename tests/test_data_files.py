@@ -27,7 +27,8 @@ def load_json_file(path: Path) -> Any:
     try:
         raw_text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        raise AssertionError(f"Не удалось прочитать файл {path.name} ({path}): {exc}") from exc
+        raise AssertionError(
+            f"Не удалось прочитать файл {path.name} ({path}): {exc}") from exc
     try:
         return json.loads(raw_text)
     except json.JSONDecodeError as exc:
@@ -46,11 +47,13 @@ def validate_units_registry(data: Any) -> None:
     actual_ids = set(data.keys())
     missing_ids = sorted(EXPECTED_PARAMETER_IDS - actual_ids, key=int)
     if missing_ids:
-        raise AssertionError(f"В units_registry.json отсутствуют ID: {missing_ids}")
+        raise AssertionError(
+            f"В units_registry.json отсутствуют ID: {missing_ids}")
 
     unexpected_ids = sorted(actual_ids - EXPECTED_PARAMETER_IDS)
     if unexpected_ids:
-        raise AssertionError(f"В units_registry.json обнаружены лишние ID: {unexpected_ids}")
+        raise AssertionError(
+            f"В units_registry.json обнаружены лишние ID: {unexpected_ids}")
 
     for param_id in sorted(EXPECTED_PARAMETER_IDS, key=int):
         entry = data[param_id]
@@ -60,7 +63,8 @@ def validate_units_registry(data: Any) -> None:
                 f"получено: {type(entry).__name__}"
             )
 
-        missing_fields = [field for field in REQUIRED_PARAMETER_FIELDS if field not in entry]
+        missing_fields = [
+            field for field in REQUIRED_PARAMETER_FIELDS if field not in entry]
         if missing_fields:
             raise AssertionError(
                 f"У величины ID='{param_id}' отсутствуют обязательные поля: {missing_fields}"
@@ -205,11 +209,13 @@ def validate_presets(data: Any) -> None:
     presets = data["presets"]
     for preset_name in EXPECTED_PRESETS:
         if preset_name not in presets:
-            raise AssertionError(f"В presets.json отсутствует обязательный пресет '{preset_name}'")
+            raise AssertionError(
+                f"В presets.json отсутствует обязательный пресет '{preset_name}'")
 
     for preset_name, preset in presets.items():
         if not isinstance(preset_name, str) or not preset_name.strip():
-            raise AssertionError(f"Некорректное имя пресета в presets.json: {preset_name!r}")
+            raise AssertionError(
+                f"Некорректное имя пресета в presets.json: {preset_name!r}")
         if not isinstance(preset, dict):
             raise AssertionError(
                 f"Пресет '{preset_name}' в presets.json должен быть JSON-объектом"
@@ -308,7 +314,8 @@ class TestDataValidationDiagnostics(unittest.TestCase):
         self.assertIn("u1", str(ctx.exception))
 
     def test_invalid_hardness_row_detected(self) -> None:
-        rows = [[1.0] * HARDNESS_COLUMN_COUNT for _ in range(HARDNESS_ROW_COUNT)]
+        rows = [
+            [1.0] * HARDNESS_COLUMN_COUNT for _ in range(HARDNESS_ROW_COUNT)]
         rows[10] = [1.0, 2.0]
         with self.assertRaises(AssertionError) as ctx:
             validate_hardness_data(rows)

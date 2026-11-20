@@ -30,15 +30,18 @@ class TestConstants(unittest.TestCase):
         self.assertEqual(C.INCH_TO_MM, 25.4)
 
     def test_resolution_and_cached_numeric_factors(self):
-        self.assertEqual(data_loader.resolve_factor("@G_STANDARD"), C.G_STANDARD)
-        self.assertEqual(data_loader.resolve_factor("@KGF_TO_N / 100"), C.G_STANDARD / 100)
+        self.assertEqual(data_loader.resolve_factor(
+            "@G_STANDARD"), C.G_STANDARD)
+        self.assertEqual(data_loader.resolve_factor(
+            "@KGF_TO_N / 100"), C.G_STANDARD / 100)
         uc = UnitConverter()
         old = uc.convert(1, "Па", "кгс/см2", "0")
         with patch.object(C, "KGF_PER_CM2_TO_PA", 1):
             self.assertEqual(uc.convert(1, "Па", "кгс/см2", "0"), old)
         for type_id, entry in uc.parameters.items():
             if type_id not in ("1", "34"):
-                self.assertTrue(all(isinstance(v, (int, float)) for v in entry["factors"].values()))
+                self.assertTrue(all(isinstance(v, (int, float))
+                                for v in entry["factors"].values()))
 
     def test_unsafe_unknown_and_invalid_expressions_are_diagnostic(self):
         for expression in ("@MISSING", "@TABLE", "@G_STANDARD / 0", "@G_STANDARD.real",
@@ -55,15 +58,22 @@ class TestConstants(unittest.TestCase):
     def test_gravity_dependent_conversions(self):
         uc = UnitConverter()
         self.assertAlmostEqual(uc.convert(1, "кгс/см2", "Па", "0"), 98066.5)
-        self.assertAlmostEqual(uc.convert(1, "psi", "Па", "0"), 6894.757293168, places=8)
+        self.assertAlmostEqual(uc.convert(
+            1, "psi", "Па", "0"), 6894.757293168, places=8)
         self.assertAlmostEqual(uc.convert(1, "л.с.", "Вт", "17"), 735.49875)
-        self.assertAlmostEqual(uc.convert(1, "lbf", "Н", "20"), 4.4482216152605)
+        self.assertAlmostEqual(uc.convert(
+            1, "lbf", "Н", "20"), 4.4482216152605)
         for type_id in ("36", "37", "38", "39", "40", "41"):
-            self.assertAlmostEqual(uc.convert(1, "кгс/мм2", "МПа", type_id), 9.80665)
-        self.assertAlmostEqual(uc.convert(1, "кгс*м/см2", "кДж/м2", "42"), 98.0665)
-        self.assertAlmostEqual(uc.convert(1, "Н/см4", "кгс/см4", "46"), 1 / 9.80665)
-        self.assertAlmostEqual(uc.convert(1, "радианы", "град", "30"), 180 / math.pi)
-        self.assertAlmostEqual(uc.convert(1, "об/мин", "рад/с", "47"), 2 * math.pi / 60)
+            self.assertAlmostEqual(uc.convert(
+                1, "кгс/мм2", "МПа", type_id), 9.80665)
+        self.assertAlmostEqual(uc.convert(
+            1, "кгс*м/см2", "кДж/м2", "42"), 98.0665)
+        self.assertAlmostEqual(uc.convert(
+            1, "Н/см4", "кгс/см4", "46"), 1 / 9.80665)
+        self.assertAlmostEqual(uc.convert(
+            1, "радианы", "град", "30"), 180 / math.pi)
+        self.assertAlmostEqual(uc.convert(
+            1, "об/мин", "рад/с", "47"), 2 * math.pi / 60)
 
     def test_no_forbidden_literals_outside_constants(self):
         forbidden = {9.80665, 0.45359237, 273.15, 101325, 133.322387415, 735.49875,
@@ -82,8 +92,10 @@ class TestConstants(unittest.TestCase):
                 if isinstance(factor, (int, float)):
                     self.assertNotIn(factor, forbidden, (type_id, code))
                 elif "@" in factor:
-                    source = __import__("re").sub(r"@([A-Z][A-Z0-9_]*)", r"\1", factor)
+                    source = __import__("re").sub(
+                        r"@([A-Z][A-Z0-9_]*)", r"\1", factor)
                     for node in ast.walk(ast.parse(source, mode="eval")):
-                        value = getattr(node, "value", getattr(node, "n", None))
+                        value = getattr(
+                            node, "value", getattr(node, "n", None))
                         if isinstance(value, (int, float)):
                             self.assertNotIn(value, forbidden, (type_id, code))

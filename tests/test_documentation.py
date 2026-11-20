@@ -13,7 +13,8 @@ class TestDocumentation(unittest.TestCase):
         for name in uniconv.__all__:
             self.assertTrue(hasattr(uniconv, name))
         readme = Path(__file__).resolve().parents[1] / "README.md"
-        blocks = re.findall(r"```python\n(.*?)```", readme.read_text(encoding="utf-8"), re.S)
+        blocks = re.findall(r"```python\n(.*?)```",
+                            readme.read_text(encoding="utf-8"), re.S)
         self.assertGreaterEqual(len(blocks), 5)
         namespace = {}
         with contextlib.redirect_stdout(io.StringIO()):

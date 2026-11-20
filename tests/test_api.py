@@ -51,7 +51,8 @@ class TestApiById(unittest.TestCase):
         self.assertEqual(info["id"], "47")
         self.assertTrue(info["name_RU"])
         self.assertTrue(info["name_ENG"])
-        self.assertEqual(set(info.keys()), {"id", "name_RU", "name_ENG", "base_unit"})
+        self.assertEqual(set(info.keys()), {
+                         "id", "name_RU", "name_ENG", "base_unit"})
 
         base_code = self.uc.get_base_unit("47")
         self.assertEqual(base_code, info["base_unit"])
@@ -77,12 +78,14 @@ class TestApiById(unittest.TestCase):
             12.5,
             places=10,
         )
-        self.assertEqual(self.uc.convert(7.25, other_code, other_code, "47"), 7.25)
+        self.assertEqual(self.uc.convert(
+            7.25, other_code, other_code, "47"), 7.25)
 
     def test_returned_metadata_and_units_are_independent_copies(self) -> None:
         info = self.uc.get_parameter_info("0")
         info["name_RU"] = "Изменено"
-        self.assertEqual(self.uc.get_parameter_info("0")["name_RU"], "Давление")
+        self.assertEqual(self.uc.get_parameter_info("0")
+                         ["name_RU"], "Давление")
 
         units = self.uc.get_available_units("0")
         units[0]["ui"] = "MUTATED"
@@ -94,7 +97,8 @@ class TestApiById(unittest.TestCase):
 
     def test_legacy_keyword_arguments_are_rejected(self) -> None:
         with self.assertRaises(TypeError):
-            self.uc.convert(10, from_unit="бар", to_unit="кгс/см2", parameter_type="0")
+            self.uc.convert(10, from_unit="бар",
+                            to_unit="кгс/см2", parameter_type="0")
 
 
 class TestUnknownIdAndNamesRejected(unittest.TestCase):
@@ -117,7 +121,8 @@ class TestUnknownIdAndNamesRejected(unittest.TestCase):
         with self.assertRaises(UnknownParameterError):
             self.uc.convert(1, "unknown", "unknown", bad_id)
         with self.assertRaises(UnknownParameterError):
-            self.uc.add_unit(bad_id, unit_symbol="x", unit_name="X", to_base=1.0)
+            self.uc.add_unit(bad_id, unit_symbol="x",
+                             unit_name="X", to_base=1.0)
 
     def test_unknown_ids_raise_uniformly(self) -> None:
         for bad_id in ("999", "-1", "", "00", "48", " 0", 0, 47, None):
@@ -237,7 +242,8 @@ class TestCodeVsUiSeparation(unittest.TestCase):
             self.uc.get_available_units("48"),
             [{"code": "m/s", "ui": "m/s"}, {"code": "km/h", "ui": "км/ч"}],
         )
-        self.assertAlmostEqual(self.uc.convert(36, "km/h", "m/s", "48"), 10.0, places=10)
+        self.assertAlmostEqual(self.uc.convert(
+            36, "km/h", "m/s", "48"), 10.0, places=10)
 
         with self.assertRaises(UnknownUnitError):
             self.uc.to_base(36, "км/ч", "48")

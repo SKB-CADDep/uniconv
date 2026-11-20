@@ -10,7 +10,8 @@ class TestUnitConverter(unittest.TestCase):
     def test_metadata_and_extreme_ids(self):
         for type_id in ("0", "47"):
             info = self.uc.get_parameter_info(type_id)
-            self.assertEqual(set(info), {"id", "name_RU", "name_ENG", "base_unit"})
+            self.assertEqual(
+                set(info), {"id", "name_RU", "name_ENG", "base_unit"})
             self.assertEqual(info["id"], type_id)
             self.assertEqual(self.uc.get_base_unit(type_id), info["base_unit"])
         self.assertEqual(self.uc.get_base_unit("0"), "кгс/см2")
@@ -19,12 +20,14 @@ class TestUnitConverter(unittest.TestCase):
     def test_available_units_code_ui_and_isolation(self):
         units = self.uc.get_available_units("0")
         self.assertEqual(units[0], {"code": "кгс/см2", "ui": "кгс/см²"})
-        self.assertEqual([u["code"] for u in units], list(self.uc.parameters["0"]["factors"]))
+        self.assertEqual([u["code"] for u in units], list(
+            self.uc.parameters["0"]["factors"]))
         units[0]["ui"] = "changed"
         info = self.uc.get_parameter_info("0")
         info["name_RU"] = "changed"
         self.assertEqual(self.uc.get_available_units("0")[0]["ui"], "кгс/см²")
-        self.assertEqual(self.uc.get_parameter_info("0")["name_RU"], "Давление")
+        self.assertEqual(self.uc.get_parameter_info("0")
+                         ["name_RU"], "Давление")
 
     def test_unknown_id_is_uniform(self):
         for type_id in ("unknown", "pressure", "Pressure", "Давление", " 0", "00", 0, None, []):
@@ -54,33 +57,42 @@ class TestUnitConverter(unittest.TestCase):
         other = UnitConverter()
         self.uc.add_parameter("48", parameter_name="Скорость пользователя", parameter_name_eng="Custom velocity",
                               base_unit_symbol="m/s", base_unit_name="Metre per second")
-        self.uc.add_unit("48", unit_symbol="km/h", unit_name="Kilometre per hour", to_base=1/3.6)
+        self.uc.add_unit("48", unit_symbol="km/h",
+                         unit_name="Kilometre per hour", to_base=1/3.6)
         self.assertAlmostEqual(self.uc.convert(36, "km/h", "m/s", "48"), 10)
         self.assertAlmostEqual(self.uc.convert(20, "m/s", "km/h", "48"), 72)
         self.assertNotIn("48", other.parameters)
-        self.uc.add_unit("0", unit_symbol="custom", unit_name="Custom", to_base=2, display_label="Custom UI")
+        self.uc.add_unit("0", unit_symbol="custom",
+                         unit_name="Custom", to_base=2, display_label="Custom UI")
         self.assertNotIn("custom", other.parameters["0"]["factors"])
-        self.assertIn({"code": "custom", "ui": "Custom UI"}, self.uc.get_available_units("0"))
+        self.assertIn({"code": "custom", "ui": "Custom UI"},
+                      self.uc.get_available_units("0"))
         with self.assertRaises(ValueError):
-            self.uc.add_parameter("48", parameter_name="Duplicate", base_unit_symbol="m/s", base_unit_name="Metre")
+            self.uc.add_parameter(
+                "48", parameter_name="Duplicate", base_unit_symbol="m/s", base_unit_name="Metre")
         with self.assertRaises(ValueError):
-            self.uc.add_parameter("speed", parameter_name="Bad ID", base_unit_symbol="m/s", base_unit_name="Metre")
+            self.uc.add_parameter(
+                "speed", parameter_name="Bad ID", base_unit_symbol="m/s", base_unit_name="Metre")
 
     def test_dynamic_functions_and_explicit_inverse(self):
         self.uc.add_unit("24", unit_symbol="shifted", unit_name="Shifted", to_base=lambda v: v + 10,
                          from_base=lambda v: v - 10)
         self.assertEqual(self.uc.convert(5, "shifted", "мм", "24"), 15)
         self.assertEqual(self.uc.convert(15, "мм", "shifted", "24"), 5)
-        self.uc.add_unit("24", unit_symbol="double", unit_name="Double", to_base=2, from_base=0.5)
+        self.uc.add_unit("24", unit_symbol="double",
+                         unit_name="Double", to_base=2, from_base=0.5)
         self.assertEqual(self.uc.convert(12, "double", "shifted", "24"), 14)
         with self.assertRaises(ValueError):
-            self.uc.add_unit("24", unit_symbol="bad", unit_name="Bad", to_base=lambda v: v)
+            self.uc.add_unit("24", unit_symbol="bad",
+                             unit_name="Bad", to_base=lambda v: v)
         for factor in (0, float("nan"), float("inf")):
             with self.assertRaises(ValueError):
-                self.uc.add_unit("24", unit_symbol="bad", unit_name="Bad", to_base=factor)
+                self.uc.add_unit("24", unit_symbol="bad",
+                                 unit_name="Bad", to_base=factor)
         self.assertNotIn("bad", self.uc.parameters["24"]["factors"])
         with self.assertRaises(ValueError):
-            self.uc.add_unit("24", unit_symbol="мм", unit_name="Base", to_base=2)
+            self.uc.add_unit("24", unit_symbol="мм",
+                             unit_name="Base", to_base=2)
 
     def test_hardness_is_not_treated_as_linear(self):
         self.assertEqual(self.uc.convert(200, "HB", "HB", "34"), 200)
